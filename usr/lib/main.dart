@@ -1,123 +1,467 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const WorkoutApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class WorkoutApp extends StatelessWidget {
+  const WorkoutApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Neon Gym Tracker',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        primaryColor: const Color(0xFF76FF03), // Neon Lime
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF76FF03),
+          secondary: Color(0xFF00E5FF), // Neon Blue
+          surface: Color(0xFF1E1E1E),
+          onPrimary: Colors.black,
+        ),
+        cardTheme: CardTheme(
+          color: const Color(0xFF1E1E1E),
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.white.withOpacity(0.1)),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF2C2C2C),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(8)),
+            borderSide: BorderSide(color: Color(0xFF76FF03), width: 2),
+          ),
+          labelStyle: const TextStyle(color: Colors.grey),
+        ),
       ),
       initialRoute: '/',
       routes: {
-        '/': (context) => const MyHomePage(title: 'Flutter Demo Home Page'),
+        '/': (context) => const WorkoutHomePage(),
       },
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+class WorkoutEntry {
+  final String id;
+  final DateTime date;
+  final String exercise;
+  final double weight;
+  final int sets;
+  final int reps;
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
+  WorkoutEntry({
+    required this.id,
+    required this.date,
+    required this.exercise,
+    required this.weight,
+    required this.sets,
+    required this.reps,
+  });
 
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'date': date.toIso8601String(),
+        'exercise': exercise,
+        'weight': weight,
+        'sets': sets,
+        'reps': reps,
+      };
 
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  factory WorkoutEntry.fromJson(Map<String, dynamic> json) {
+    return WorkoutEntry(
+      id: json['id'],
+      date: DateTime.parse(json['date']),
+      exercise: json['exercise'],
+      weight: json['weight'].toDouble(),
+      sets: json['sets'],
+      reps: json['reps'],
+    );
+  }
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class WorkoutHomePage extends StatefulWidget {
+  const WorkoutHomePage({super.key});
 
-  void _incrementCounter() {
+  @override
+  State<WorkoutHomePage> createState() => _WorkoutHomePageState();
+}
+
+class _WorkoutHomePageState extends State<WorkoutHomePage> {
+  final _formKey = GlobalKey<FormState>();
+  final _exerciseController = TextEditingController();
+  final _weightController = TextEditingController();
+  final _setsController = TextEditingController();
+  final _repsController = TextEditingController();
+  
+  DateTime _selectedDate = DateTime.now();
+  List<WorkoutEntry> _workouts = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWorkouts();
+  }
+
+  @override
+  void dispose() {
+    _exerciseController.dispose();
+    _weightController.dispose();
+    _setsController.dispose();
+    _repsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadWorkouts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? workoutsJson = prefs.getString('workouts');
+    if (workoutsJson != null) {
+      final List<dynamic> decoded = jsonDecode(workoutsJson);
+      setState(() {
+        _workouts = decoded.map((e) => WorkoutEntry.fromJson(e)).toList();
+        _sortWorkouts();
+        _isLoading = false;
+      });
+    } else {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _saveWorkouts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String encoded = jsonEncode(_workouts.map((e) => e.toJson()).toList());
+    await prefs.setString('workouts', encoded);
+  }
+
+  void _sortWorkouts() {
+    _workouts.sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  void _addWorkout() {
+    if (_formKey.currentState!.validate()) {
+      final newEntry = WorkoutEntry(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        date: _selectedDate,
+        exercise: _exerciseController.text,
+        weight: double.tryParse(_weightController.text) ?? 0,
+        sets: int.tryParse(_setsController.text) ?? 0,
+        reps: int.tryParse(_repsController.text) ?? 0,
+      );
+
+      setState(() {
+        _workouts.add(newEntry);
+        _sortWorkouts();
+      });
+      _saveWorkouts();
+      
+      // Clear form but keep date
+      _exerciseController.clear();
+      _weightController.clear();
+      _setsController.clear();
+      _repsController.clear();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Workout logged!'),
+          backgroundColor: Color(0xFF76FF03),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _deleteWorkout(String id) {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _workouts.removeWhere((entry) => entry.id == id);
     });
+    _saveWorkouts();
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2101),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF76FF03),
+              onPrimary: Colors.black,
+              surface: Color(0xFF1E1E1E),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text(
+          'NEON GYM LOG',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.5,
+            color: Color(0xFF76FF03),
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                _buildInputForm(),
+                const Divider(height: 1, color: Colors.white24),
+                Expanded(child: _buildWorkoutList()),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildInputForm() {
+    return Container(
+      padding: const EdgeInsets.all(16.0),
+      decoration: const BoxDecoration(
+        color: Color(0xFF121212),
+      ),
+      child: Form(
+        key: _formKey,
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text('$_counter', style: Theme.of(context).textTheme.headlineMedium),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Date Picker Row
+            InkWell(
+              onTap: () => _selectDate(context),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white24),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Date: ${DateFormat('MMM dd, yyyy').format(_selectedDate)}",
+                      style: const TextStyle(fontSize: 16, color: Colors.white),
+                    ),
+                    const Icon(Icons.calendar_today, color: Color(0xFF76FF03)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            
+            // Exercise Name
+            TextFormField(
+              controller: _exerciseController,
+              decoration: const InputDecoration(
+                labelText: 'Exercise Name',
+                prefixIcon: Icon(Icons.fitness_center, color: Colors.grey),
+              ),
+              style: const TextStyle(color: Colors.white),
+              validator: (value) => value!.isEmpty ? 'Enter exercise' : null,
+            ),
+            const SizedBox(height: 12),
+            
+            // Stats Row
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _weightController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Weight',
+                      suffixText: 'kg',
+                    ),
+                    style: const TextStyle(color: Colors.white),
+                    validator: (value) => value!.isEmpty ? 'Required' : null,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _setsController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Sets'),
+                    style: const TextStyle(color: Colors.white),
+                    validator: (value) => value!.isEmpty ? 'Required' : null,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _repsController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Reps'),
+                    style: const TextStyle(color: Colors.white),
+                    validator: (value) => value!.isEmpty ? 'Required' : null,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Add Button
+            ElevatedButton(
+              onPressed: _addWorkout,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF76FF03),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                elevation: 0,
+              ),
+              child: const Text(
+                'LOG WORKOUT',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+    );
+  }
+
+  Widget _buildWorkoutList() {
+    if (_workouts.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.history, size: 64, color: Colors.grey[800]),
+            const SizedBox(height: 16),
+            Text(
+              'No workouts logged yet',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _workouts.length,
+      itemBuilder: (context, index) {
+        final workout = _workouts[index];
+        return Dismissible(
+          key: Key(workout.id),
+          direction: DismissDirection.endToStart,
+          background: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 20),
+            color: Colors.redAccent,
+            child: const Icon(Icons.delete, color: Colors.white),
+          ),
+          onDismissed: (direction) => _deleteWorkout(workout.id),
+          child: Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        DateFormat('EEEE, MMM d').format(workout.date),
+                        style: const TextStyle(
+                          color: Color(0xFF76FF03),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.grey, size: 20),
+                        onPressed: () => _deleteWorkout(workout.id),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    workout.exercise,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _buildStatBadge(Icons.fitness_center, '${workout.weight} kg'),
+                      const SizedBox(width: 16),
+                      _buildStatBadge(Icons.repeat, '${workout.sets} sets'),
+                      const SizedBox(width: 16),
+                      _buildStatBadge(Icons.numbers, '${workout.reps} reps'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatBadge(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFF00E5FF)),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
